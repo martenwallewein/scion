@@ -19,7 +19,9 @@
 package conn
 
 import (
+	"context"
 	"flag"
+	"fmt"
 	"net"
 	"syscall"
 	"time"
@@ -27,6 +29,7 @@ import (
 
 	"golang.org/x/net/ipv4"
 	"golang.org/x/net/ipv6"
+	"golang.org/x/sys/unix"
 
 	"github.com/scionproto/scion/go/lib/common"
 	"github.com/scionproto/scion/go/lib/log"
@@ -216,16 +219,47 @@ func (cc *connUDPBase) initConnUDP(network string, laddr, raddr *net.UDPAddr, cf
 	if laddr == nil {
 		return serrors.New("listen address must be specified")
 	}
+	fmt.Println("Listen REUSE")
+	lc := net.ListenConfig{
+		Control: func(network, address string, c syscall.RawConn) error {
+			var opErr error
+			err := c.Control(func(fd uintptr) {
+				opErr = unix.SetsockoptInt(int(fd), unix.SOL_SOCKET, unix.SO_REUSEPORT, 1)
+			})
+			if err != nil {
+				return err
+			}
+			return opErr
+		},
+	}
 	if raddr == nil {
-		if c, err = net.ListenUDP(network, laddr); err != nil {
+		lp, err := lc.ListenPacket(context.Background(), network, laddr.String())
+		if err != nil {
 			return serrors.WrapStr("Error listening on socket", err,
 				"network", network, "listen", laddr)
 		}
+		c = lp.(*net.UDPConn)
+
 	} else {
-		if c, err = net.DialUDP(network, laddr, raddr); err != nil {
+		d := net.Dialer{
+			LocalAddr: laddr,
+			Control: func(network, address string, c syscall.RawConn) error {
+				var opErr error
+				err := c.Control(func(fd uintptr) {
+					opErr = unix.SetsockoptInt(int(fd), unix.SOL_SOCKET, unix.SO_REUSEPORT, 1)
+				})
+				if err != nil {
+					return err
+				}
+				return opErr
+			},
+		}
+		conn, err := d.Dial(network, raddr.String())
+		if err != nil {
 			return serrors.WrapStr("Error setting up connection", err,
 				"network", network, "listen", laddr, "remote", raddr)
 		}
+		c = conn.(*net.UDPConn)
 	}
 	// Set reporting socket options
 	if err := sockctrl.SetsockoptInt(c, syscall.SOL_SOCKET, syscall.SO_RXQ_OVFL, 1); err != nil {

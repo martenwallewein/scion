@@ -39,6 +39,7 @@ import (
 func main() {
 	var flags struct {
 		config string
+		numdp  int
 	}
 	metrics := router.NewMetrics()
 	executable := filepath.Base(os.Args[0])
@@ -50,7 +51,7 @@ func main() {
 		SilenceUsage:  true,
 		Args:          cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return run(flags.config, metrics)
+			return run(flags.config, metrics, flags.numdp)
 		},
 	}
 	cmd.AddCommand(
@@ -59,6 +60,7 @@ func main() {
 		command.NewVersion(cmd),
 	)
 	cmd.Flags().StringVar(&flags.config, "config", "", "Configuration file (required)")
+	cmd.Flags().IntVar(&flags.numdp, "numdp", 1, "Number of parallel dataplanes")
 	cmd.MarkFlagRequired("config")
 	if err := cmd.Execute(); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %s\n", err)
@@ -66,7 +68,7 @@ func main() {
 	}
 }
 
-func run(file string, metrics *router.Metrics) error {
+func run(file string, metrics *router.Metrics, numDPs int) error {
 	fatal.Init()
 	fileConfig, err := setupBasic(file)
 	if err != nil {
@@ -84,24 +86,33 @@ func run(file string, metrics *router.Metrics) error {
 	}
 	stop := make(chan struct{})
 	wg := new(sync.WaitGroup)
-	dp := &router.Connector{
-		DataPlane: router.DataPlane{
-			Metrics: metrics,
-		},
-	}
-	iaCtx := &control.IACtx{
-		Config: controlConfig,
-		DP:     dp,
-		Stop:   stop,
-	}
-	if err := iaCtx.Start(wg); err != nil {
-		return serrors.WrapStr("starting dataplane", err)
-	}
-	if err := setupHTTPHandlers(fileConfig); err != nil {
-		return serrors.WrapStr("starting HTTP endpoints", err)
-	}
-	if err := dp.DataPlane.Run(); err != nil {
-		return serrors.WrapStr("starting dataplane", err)
+
+	// if err := setupHTTPHandlers(fileConfig); err != nil {
+	//	return serrors.WrapStr("starting HTTP endpoints", err)
+	//}
+	for i := 0; i < numDPs; i++ {
+		go func(i int) {
+			dp := &router.Connector{
+				DataPlane: router.DataPlane{
+					Metrics: metrics,
+					Id:      i,
+				},
+			}
+
+			iaCtx := &control.IACtx{
+				Config: controlConfig,
+				DP:     dp,
+				Stop:   stop,
+			}
+			if err := iaCtx.Start(wg); err != nil {
+				fmt.Println(serrors.WrapStr("starting iactx", err))
+			}
+
+			if err := dp.DataPlane.Run(); err != nil {
+				fmt.Println(serrors.WrapStr("starting dataplane", err))
+			}
+		}(i)
+
 	}
 
 	// XXX(lukedirtwalker): Currently not reachable because the dataplan run is

@@ -99,6 +99,7 @@ type DataPlane struct {
 	mtx              sync.Mutex
 	running          bool
 	Metrics          *Metrics
+	Id               int
 }
 
 var (
@@ -467,7 +468,7 @@ func (d *DataPlane) Run() error {
 				inputLabels := interfaceToMetricLabels(ingressID, d.localIA, d.neighborIAs)
 				d.Metrics.InputPacketsTotal.With(inputLabels).Inc()
 				d.Metrics.InputBytesTotal.With(inputLabels).Add(float64(p.N))
-
+				// fmt.Printf("Handling packet on dataplane id %d\n", d.Id)
 				result, err := d.processPkt(ingressID, p.Buffers[0], p.Addr, spkt, origPacket,
 					buffer)
 
@@ -980,28 +981,31 @@ func (p *scionPacketProcessor) egressInterface() uint16 {
 }
 
 func (p *scionPacketProcessor) validateEgressUp() (processResult, error) {
-	egressID := p.egressInterface()
-	if v, ok := p.d.bfdSessions[egressID]; ok {
-		if !v.IsUp() {
-			scmpH := &slayers.SCMP{
-				TypeCode: slayers.CreateSCMPTypeCode(slayers.SCMPTypeExternalInterfaceDown, 0),
-			}
-			var scmpP gopacket.SerializableLayer = &slayers.SCMPExternalInterfaceDown{
-				IA:   p.d.localIA,
-				IfID: uint64(egressID),
-			}
-			if _, external := p.d.external[egressID]; !external {
-				scmpH.TypeCode =
-					slayers.CreateSCMPTypeCode(slayers.SCMPTypeInternalConnectivityDown, 0)
-				scmpP = &slayers.SCMPInternalConnectivityDown{
-					IA:      p.d.localIA,
-					Ingress: uint64(p.ingressID),
-					Egress:  uint64(egressID),
-				}
-			}
-			return p.packSCMP(scmpH, scmpP, serrors.New("bfd session down"))
+	// TODO: This need to be fixed before deploying the parallel-dataplanes change
+	// anywhere, otherwise bad things will happen...
+	// egressID := p.egressInterface()
+	// if v, ok := p.d.bfdSessions[egressID]; ok {
+	/*if !v.IsUp() {
+		scmpH := &slayers.SCMP{
+			TypeCode: slayers.CreateSCMPTypeCode(slayers.SCMPTypeExternalInterfaceDown, 0),
 		}
-	}
+		var scmpP gopacket.SerializableLayer = &slayers.SCMPExternalInterfaceDown{
+			IA:   p.d.localIA,
+			IfID: uint64(egressID),
+		}
+		if _, external := p.d.external[egressID]; !external {
+			scmpH.TypeCode =
+				slayers.CreateSCMPTypeCode(slayers.SCMPTypeInternalConnectivityDown, 0)
+			scmpP = &slayers.SCMPInternalConnectivityDown{
+				IA:      p.d.localIA,
+				Ingress: uint64(p.ingressID),
+				Egress:  uint64(egressID),
+			}
+		}
+		// return p.packSCMP(scmpH, scmpP, serrors.New("bfd session down"))
+		return processResult{}, nil
+	}*/
+	// }
 	return processResult{}, nil
 }
 
