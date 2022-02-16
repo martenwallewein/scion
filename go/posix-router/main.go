@@ -54,80 +54,94 @@ func realMain(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	g, errCtx := errgroup.WithContext(ctx)
-	metrics := router.NewMetrics()
-	dp := &router.Connector{
-		DataPlane: router.DataPlane{
-			Metrics: metrics,
-		},
-	}
-	iaCtx := &control.IACtx{
-		Config: controlConfig,
-		DP:     dp,
-	}
-	if err := iaCtx.Configure(); err != nil {
-		return serrors.WrapStr("configuring dataplane", err)
-	}
-	statusPages := service.StatusPages{
-		"info":      service.NewInfoStatusPage(),
-		"config":    service.NewConfigStatusPage(globalCfg),
-		"log/level": service.NewLogLevelStatusPage(),
-		"topology":  topologyHandler(iaCtx.Config.Topo),
-	}
-	if err := statusPages.Register(http.DefaultServeMux, globalCfg.General.ID); err != nil {
-		return err
-	}
-
-	var cleanup app.Cleanup
-	g.Go(func() error {
-		defer log.HandlePanic()
-		<-errCtx.Done()
-		return cleanup.Do()
-	})
-
-	// Initialize and start service management API.
-	if globalCfg.API.Addr != "" {
-		r := chi.NewRouter()
-		r.Use(cors.Handler(cors.Options{
-			AllowedOrigins: []string{"*"},
-		}))
-		r.Get("/", api.ServeSpecInteractive)
-		r.Get("/openapi.json", api.ServeSpecJSON)
-		server := api.Server{
-			Config:    service.NewConfigStatusPage(globalCfg).Handler,
-			Info:      service.NewInfoStatusPage().Handler,
-			LogLevel:  service.NewLogLevelStatusPage().Handler,
-			Dataplane: dp,
-		}
-		log.Info("Exposing API", "addr", globalCfg.API.Addr)
-		h := api.HandlerFromMuxWithBaseURL(&server, r, "/api/v1")
-		mgmtServer := &http.Server{
-			Addr:    globalCfg.API.Addr,
-			Handler: h,
-		}
-		cleanup.Add(mgmtServer.Close)
-		g.Go(func() error {
-			defer log.HandlePanic()
-			err := mgmtServer.ListenAndServe()
-			if err != nil && !errors.Is(err, http.ErrServerClosed) {
-				return serrors.WrapStr("serving service management API", err)
+	// TODO: Load from config or elsewhere
+	for i := 0; i < 10; i++ {
+		go func(i int) {
+			g, errCtx := errgroup.WithContext(ctx)
+			metrics := router.NewMetrics()
+			dp := &router.Connector{
+				DataPlane: router.DataPlane{
+					Metrics: metrics,
+					ID:      i,
+				},
 			}
-			return nil
-		})
-	}
-	g.Go(func() error {
-		defer log.HandlePanic()
-		return globalCfg.Metrics.ServePrometheus(errCtx)
-	})
-	g.Go(func() error {
-		defer log.HandlePanic()
-		if err := dp.DataPlane.Run(errCtx); err != nil {
-			return serrors.WrapStr("running dataplane", err)
-		}
-		return nil
-	})
+			iaCtx := &control.IACtx{
+				Config: controlConfig,
+				DP:     dp,
+			}
 
-	return g.Wait()
+			if err := iaCtx.Configure(); err != nil {
+				log.Error("Failed to configure dataplane", serrors.WrapStr("configuring dataplane", err))
+			}
+
+			if i == 0 {
+				statusPages := service.StatusPages{
+					"info":      service.NewInfoStatusPage(),
+					"config":    service.NewConfigStatusPage(globalCfg),
+					"log/level": service.NewLogLevelStatusPage(),
+					"topology":  topologyHandler(iaCtx.Config.Topo),
+				}
+				if err := statusPages.Register(http.DefaultServeMux, globalCfg.General.ID); err != nil {
+					return
+				}
+			}
+
+			var cleanup app.Cleanup
+			g.Go(func() error {
+				defer log.HandlePanic()
+				<-errCtx.Done()
+				return cleanup.Do()
+			})
+
+			// Initialize and start service management API.
+			if globalCfg.API.Addr != "" && i == 0 {
+				r := chi.NewRouter()
+				r.Use(cors.Handler(cors.Options{
+					AllowedOrigins: []string{"*"},
+				}))
+				r.Get("/", api.ServeSpecInteractive)
+				r.Get("/openapi.json", api.ServeSpecJSON)
+				server := api.Server{
+					Config:    service.NewConfigStatusPage(globalCfg).Handler,
+					Info:      service.NewInfoStatusPage().Handler,
+					LogLevel:  service.NewLogLevelStatusPage().Handler,
+					Dataplane: dp,
+				}
+				log.Info("Exposing API", "addr", globalCfg.API.Addr)
+				h := api.HandlerFromMuxWithBaseURL(&server, r, "/api/v1")
+				mgmtServer := &http.Server{
+					Addr:    globalCfg.API.Addr,
+					Handler: h,
+				}
+				cleanup.Add(mgmtServer.Close)
+				g.Go(func() error {
+					defer log.HandlePanic()
+					err := mgmtServer.ListenAndServe()
+					if err != nil && !errors.Is(err, http.ErrServerClosed) {
+						return serrors.WrapStr("serving service management API", err)
+					}
+					return nil
+				})
+			}
+			if i == 0 {
+				g.Go(func() error {
+					defer log.HandlePanic()
+					return globalCfg.Metrics.ServePrometheus(errCtx)
+				})
+			}
+			g.Go(func() error {
+				defer log.HandlePanic()
+				if err := dp.DataPlane.Run(errCtx); err != nil {
+					return serrors.WrapStr("running dataplane", err)
+				}
+				return nil
+			})
+
+			g.Wait()
+		}(i)
+	}
+	// TOOD: correct error handling
+	return nil
 }
 
 func loadControlConfig() (*control.Config, error) {

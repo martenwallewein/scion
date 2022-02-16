@@ -105,6 +105,7 @@ type DataPlane struct {
 	running           bool
 	Metrics           *Metrics
 	forwardingMetrics map[uint16]forwardingMetrics
+	ID                int
 }
 
 var (
@@ -1032,7 +1033,9 @@ func (p *scionPacketProcessor) egressInterface() uint16 {
 }
 
 func (p *scionPacketProcessor) validateEgressUp() (processResult, error) {
-	egressID := p.egressInterface()
+	// TODO: This need to be fixed before deploying the parallel-dataplanes change
+	// anywhere, otherwise bad things will happen...
+	/*egressID := p.egressInterface()
 	if v, ok := p.d.bfdSessions[egressID]; ok {
 		if !v.IsUp() {
 			scmpH := &slayers.SCMP{
@@ -1053,7 +1056,7 @@ func (p *scionPacketProcessor) validateEgressUp() (processResult, error) {
 			}
 			return p.packSCMP(scmpH, scmpP, serrors.New("bfd session down"))
 		}
-	}
+	}*/
 	return processResult{}, nil
 }
 
