@@ -22,7 +22,6 @@ import (
 	"net/http"
 	_ "net/http/pprof"
 	"sync"
-	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/cors"
@@ -52,22 +51,27 @@ func main() {
 }
 
 func realMain(ctx context.Context) error {
-	fmt.Println("TEST")
 	controlConfig, err := loadControlConfig()
 	if err != nil {
 		return err
 	}
+	// We need to share bfdSessions from the first dataplane and the metrics
 	var firstDataPlane *router.DataPlane
 	var firstMetrics *router.Metrics
 	var wg sync.WaitGroup
+	var configureWg sync.WaitGroup
 
-	for i := 0; i < 2; i++ {
+	// TODO: Load this from configuration
+	for i := 0; i < 8; i++ {
 		wg.Add(1)
-		if i > 0 {
-			time.Sleep(5 * time.Second)
+		// We need to wait here until the first iteration is done
+		// Maybe there is a more intuitive way to do this...
+		if i == 0 {
+			configureWg.Add(1)
+		} else {
+			configureWg.Wait()
 		}
 		go func(i int) {
-			log.Debug("Starting...")
 			g, errCtx := errgroup.WithContext(ctx)
 			var metrics *router.Metrics
 			if i == 0 {
@@ -102,11 +106,10 @@ func realMain(ctx context.Context) error {
 					"topology":  topologyHandler(iaCtx.Config.Topo),
 				}
 				if err := statusPages.Register(http.DefaultServeMux, globalCfg.General.ID); err != nil {
-					fmt.Println(err)
+					log.Error("Failed to register statuspages", serrors.WrapStr("", err))
 					return
 				}
 			} else {
-				fmt.Println(firstDataPlane.BfdSessions)
 				dp.DataPlane.BfdSessions = firstDataPlane.BfdSessions
 			}
 
@@ -152,7 +155,9 @@ func realMain(ctx context.Context) error {
 					defer log.HandlePanic()
 					return globalCfg.Metrics.ServePrometheus(errCtx)
 				})
+				configureWg.Done()
 			}
+
 			g.Go(func() error {
 				defer log.HandlePanic()
 				if err := dp.DataPlane.Run(errCtx); err != nil {
