@@ -21,6 +21,8 @@ import (
 	"fmt"
 	"net/http"
 	_ "net/http/pprof"
+	"sync"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/cors"
@@ -50,15 +52,32 @@ func main() {
 }
 
 func realMain(ctx context.Context) error {
+	fmt.Println("TEST")
 	controlConfig, err := loadControlConfig()
 	if err != nil {
 		return err
 	}
-	// TODO: Load from config or elsewhere
-	for i := 0; i < 10; i++ {
+	var firstDataPlane *router.DataPlane
+	var firstMetrics *router.Metrics
+	var wg sync.WaitGroup
+
+	for i := 0; i < 2; i++ {
+		wg.Add(1)
+		if i > 0 {
+			time.Sleep(5 * time.Second)
+		}
 		go func(i int) {
+			log.Debug("Starting...")
 			g, errCtx := errgroup.WithContext(ctx)
-			metrics := router.NewMetrics()
+			var metrics *router.Metrics
+			if i == 0 {
+				metrics = router.NewMetrics()
+				firstMetrics = metrics
+			} else {
+				metrics = firstMetrics
+			}
+
+			log.Debug("Starting ctrl")
 			dp := &router.Connector{
 				DataPlane: router.DataPlane{
 					Metrics: metrics,
@@ -69,12 +88,13 @@ func realMain(ctx context.Context) error {
 				Config: controlConfig,
 				DP:     dp,
 			}
-
 			if err := iaCtx.Configure(); err != nil {
 				log.Error("Failed to configure dataplane", serrors.WrapStr("configuring dataplane", err))
 			}
 
 			if i == 0 {
+				firstDataPlane = &dp.DataPlane
+				log.Debug("First Dataplane")
 				statusPages := service.StatusPages{
 					"info":      service.NewInfoStatusPage(),
 					"config":    service.NewConfigStatusPage(globalCfg),
@@ -82,8 +102,12 @@ func realMain(ctx context.Context) error {
 					"topology":  topologyHandler(iaCtx.Config.Topo),
 				}
 				if err := statusPages.Register(http.DefaultServeMux, globalCfg.General.ID); err != nil {
+					fmt.Println(err)
 					return
 				}
+			} else {
+				fmt.Println(firstDataPlane.BfdSessions)
+				dp.DataPlane.BfdSessions = firstDataPlane.BfdSessions
 			}
 
 			var cleanup app.Cleanup
@@ -118,7 +142,7 @@ func realMain(ctx context.Context) error {
 					defer log.HandlePanic()
 					err := mgmtServer.ListenAndServe()
 					if err != nil && !errors.Is(err, http.ErrServerClosed) {
-						return serrors.WrapStr("serving service management API", err)
+						log.Error("", serrors.WrapStr("serving service management API", err))
 					}
 					return nil
 				})
@@ -132,14 +156,18 @@ func realMain(ctx context.Context) error {
 			g.Go(func() error {
 				defer log.HandlePanic()
 				if err := dp.DataPlane.Run(errCtx); err != nil {
-					return serrors.WrapStr("running dataplane", err)
+					log.Error("Run DP", serrors.WrapStr("running dataplane", err))
 				}
+				fmt.Println("SAD")
 				return nil
 			})
 
 			g.Wait()
+			wg.Done()
 		}(i)
 	}
+	wg.Wait()
+	fmt.Println("END")
 	// TOOD: correct error handling
 	return nil
 }

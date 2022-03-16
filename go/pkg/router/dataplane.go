@@ -99,7 +99,7 @@ type DataPlane struct {
 	internalNextHops  map[uint16]*net.UDPAddr
 	svc               *services
 	macFactory        func() hash.Hash
-	bfdSessions       map[uint16]bfdSession
+	BfdSessions       map[uint16]bfdSession
 	localIA           addr.IA
 	mtx               sync.Mutex
 	running           bool
@@ -298,7 +298,7 @@ func (d *DataPlane) AddExternalInterfaceBFD(ifID uint16, conn BatchConn,
 // returns InterfaceUp if the relevant bfdsession state is up, or if there is no BFD
 // session. Otherwise, it returns InterfaceDown.
 func (d *DataPlane) getInterfaceState(interfaceID uint16) control.InterfaceState {
-	bfdSessions := d.bfdSessions
+	bfdSessions := d.BfdSessions
 	if bfdSession, ok := bfdSessions[interfaceID]; ok && !bfdSession.IsUp() {
 		return control.InterfaceDown
 	}
@@ -311,8 +311,8 @@ func (d *DataPlane) addBFDController(ifID uint16, s *bfdSend, cfg control.BFD,
 	if cfg.Disable {
 		return errBFDDisabled
 	}
-	if d.bfdSessions == nil {
-		d.bfdSessions = make(map[uint16]bfdSession)
+	if d.BfdSessions == nil {
+		d.BfdSessions = make(map[uint16]bfdSession)
 	}
 
 	// Generate random discriminator. It can't be zero.
@@ -321,7 +321,7 @@ func (d *DataPlane) addBFDController(ifID uint16, s *bfdSend, cfg control.BFD,
 		return err
 	}
 	disc := layers.BFDDiscriminator(uint32(discInt.Uint64()) + 1)
-	d.bfdSessions[ifID] = &bfd.Session{
+	d.BfdSessions[ifID] = &bfd.Session{
 		Sender:                s,
 		DetectMult:            layers.BFDDetectMultiplier(cfg.DetectMult),
 		Logger:                log.New("component", "BFD"),
@@ -414,8 +414,8 @@ func (d *DataPlane) AddNextHopBFD(ifID uint16, src, dst *net.UDPAddr, cfg contro
 
 	for k, v := range d.internalNextHops {
 		if v.String() == dst.String() {
-			if c, ok := d.bfdSessions[k]; ok {
-				d.bfdSessions[ifID] = c
+			if c, ok := d.BfdSessions[k]; ok {
+				d.BfdSessions[ifID] = c
 				return nil
 			}
 		}
@@ -530,7 +530,7 @@ func (d *DataPlane) Run(ctx context.Context) error {
 		}
 	}
 
-	for k, v := range d.bfdSessions {
+	for k, v := range d.BfdSessions {
 		go func(ifID uint16, c bfdSession) {
 			defer log.HandlePanic()
 			if err := c.Run(); err != nil && err != bfd.AlreadyRunning {
@@ -647,7 +647,7 @@ func (p *scionPacketProcessor) processPkt(rawPkt []byte,
 }
 
 func (p *scionPacketProcessor) processInterBFD(oh *onehop.Path, data []byte) error {
-	if len(p.d.bfdSessions) == 0 {
+	if len(p.d.BfdSessions) == 0 {
 		return noBFDSessionConfigured
 	}
 
@@ -656,7 +656,7 @@ func (p *scionPacketProcessor) processInterBFD(oh *onehop.Path, data []byte) err
 		return err
 	}
 
-	if v, ok := p.d.bfdSessions[p.ingressID]; ok {
+	if v, ok := p.d.BfdSessions[p.ingressID]; ok {
 		v.Messages() <- bfd
 		return nil
 	}
@@ -665,7 +665,7 @@ func (p *scionPacketProcessor) processInterBFD(oh *onehop.Path, data []byte) err
 }
 
 func (p *scionPacketProcessor) processIntraBFD(src *net.UDPAddr, data []byte) error {
-	if len(p.d.bfdSessions) == 0 {
+	if len(p.d.BfdSessions) == 0 {
 		return noBFDSessionConfigured
 	}
 	bfd := &layers.BFD{}
@@ -681,7 +681,7 @@ func (p *scionPacketProcessor) processIntraBFD(src *net.UDPAddr, data []byte) er
 		}
 	}
 
-	if v, ok := p.d.bfdSessions[ifID]; ok {
+	if v, ok := p.d.BfdSessions[ifID]; ok {
 		v.Messages() <- bfd
 		return nil
 	}
@@ -1035,8 +1035,8 @@ func (p *scionPacketProcessor) egressInterface() uint16 {
 func (p *scionPacketProcessor) validateEgressUp() (processResult, error) {
 	// TODO: This need to be fixed before deploying the parallel-dataplanes change
 	// anywhere, otherwise bad things will happen...
-	/*egressID := p.egressInterface()
-	if v, ok := p.d.bfdSessions[egressID]; ok {
+	egressID := p.egressInterface()
+	if v, ok := p.d.BfdSessions[egressID]; ok {
 		if !v.IsUp() {
 			scmpH := &slayers.SCMP{
 				TypeCode: slayers.CreateSCMPTypeCode(slayers.SCMPTypeExternalInterfaceDown, 0),
@@ -1056,7 +1056,7 @@ func (p *scionPacketProcessor) validateEgressUp() (processResult, error) {
 			}
 			return p.packSCMP(scmpH, scmpP, serrors.New("bfd session down"))
 		}
-	}*/
+	}
 	return processResult{}, nil
 }
 

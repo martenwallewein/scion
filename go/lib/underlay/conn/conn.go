@@ -58,6 +58,7 @@ type Config struct {
 	// ReceiveBufferSize is the size of the operating system receive buffer, in
 	// bytes.
 	ReceiveBufferSize int
+	Reuseport         bool
 }
 
 // New opens a new underlay socket on the specified addresses.
@@ -169,14 +170,17 @@ func (cc *connUDPBase) initConnUDP(network string, laddr, raddr *net.UDPAddr, cf
 	if raddr == nil {
 		lc := net.ListenConfig{
 			Control: func(network, address string, c syscall.RawConn) error {
-				var opErr error
-				err := c.Control(func(fd uintptr) {
-					opErr = unix.SetsockoptInt(int(fd), unix.SOL_SOCKET, unix.SO_REUSEPORT, 1)
-				})
-				if err != nil {
-					return err
+				if cfg.Reuseport {
+					var opErr error
+					err := c.Control(func(fd uintptr) {
+						opErr = unix.SetsockoptInt(int(fd), unix.SOL_SOCKET, unix.SO_REUSEPORT, 1)
+					})
+					if err != nil {
+						return err
+					}
+					return opErr
 				}
-				return opErr
+				return nil
 			},
 		}
 		lp, err := lc.ListenPacket(context.Background(), network, laddr.String())
@@ -189,14 +193,17 @@ func (cc *connUDPBase) initConnUDP(network string, laddr, raddr *net.UDPAddr, cf
 		d := net.Dialer{
 			LocalAddr: laddr,
 			Control: func(network, address string, c syscall.RawConn) error {
-				var opErr error
-				err := c.Control(func(fd uintptr) {
-					opErr = unix.SetsockoptInt(int(fd), unix.SOL_SOCKET, unix.SO_REUSEPORT, 1)
-				})
-				if err != nil {
-					return err
+				if cfg.Reuseport {
+					var opErr error
+					err := c.Control(func(fd uintptr) {
+						opErr = unix.SetsockoptInt(int(fd), unix.SOL_SOCKET, unix.SO_REUSEPORT, 1)
+					})
+					if err != nil {
+						return err
+					}
+					return opErr
 				}
-				return opErr
+				return nil
 			},
 		}
 		conn, err := d.Dial(network, raddr.String())

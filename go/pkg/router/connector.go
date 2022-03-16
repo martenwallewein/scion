@@ -65,7 +65,7 @@ func (c *Connector) AddInternalInterface(ia addr.IA, local net.UDPAddr) error {
 		return serrors.WithCtx(errMultiIA, "current", c.ia, "new", ia)
 	}
 	connection, err := conn.New(&local, nil,
-		&conn.Config{ReceiveBufferSize: receiveBufferSize})
+		&conn.Config{ReceiveBufferSize: receiveBufferSize, Reuseport: true})
 	if err != nil {
 		return err
 	}
@@ -130,11 +130,11 @@ func (c *Connector) AddExternalInterface(localIfID common.IFIDType, link control
 	}
 
 	connection, err := conn.New(link.Local.Addr, link.Remote.Addr,
-		&conn.Config{ReceiveBufferSize: receiveBufferSize})
+		&conn.Config{ReceiveBufferSize: receiveBufferSize, Reuseport: true})
 	if err != nil {
 		return err
 	}
-	if !link.BFD.Disable {
+	if !link.BFD.Disable && c.DataPlane.ID == 0 {
 		err := c.DataPlane.AddExternalInterfaceBFD(intf, connection, link.Local,
 			link.Remote, link.BFD)
 		if err != nil {
