@@ -68,7 +68,8 @@ class DockerUtilsGenerator(object):
         }
         for volume in self.dc_conf['volumes']:
             entry_chown['volumes'].append('%s:/mnt/volumes/%s' % (volume, volume))
-        self.dc_conf['services']['utils_chowner'] = entry_chown
+        # No busybox
+        # self.dc_conf['services']['utils_chowner'] = entry_chown
 
     def _test_conf(self, topo_id):
         cntr_base = '/share'
@@ -107,7 +108,8 @@ class DockerUtilsGenerator(object):
             sig_net = self.args.networks['sig%s' % topo_id.file_fmt()][0]
             entry['environment']['SIG_IP'] = str(sig_net[ipv])
             entry['environment']['REMOTE_NETS'] = remote_nets(self.args.networks, topo_id)
-        self.dc_conf['services'][name] = entry
+        # No tester
+        # self.dc_conf['services'][name] = entry
 
     def _sig_testing_conf(self):
         text = ''

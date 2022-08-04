@@ -41,7 +41,7 @@ from topology.defines import DEFAULT6_NETWORK_ADDR
 
 DEFAULT_NETWORK = "127.0.0.0/8"
 DEFAULT_PRIV_NETWORK = "192.168.0.0/16"
-DEFAULT_SCN_DC_NETWORK = "172.20.0.0/20"
+DEFAULT_SCN_DC_NETWORK = "172.20.0.0/16"
 
 IPAddress = Union[IPv4Address, IPv6Address]
 IPNetwork = Union[IPv4Network, IPv6Network]
@@ -148,7 +148,8 @@ class SubnetGenerator(object):
             else:
                 # Docker needs space for a network and broadcast address as well as an IP linking
                 # to the host
-                req_prefix = max_prefix - math.ceil(math.log2(len(subnet) + 3))
+                # req_prefix = max_prefix - math.ceil(math.log2(len(subnet) + 3))
+                req_prefix = 24
 
             # Search all subnets from that size upwards
             for prefix in range(req_prefix, -1, -1):

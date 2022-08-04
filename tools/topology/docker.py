@@ -31,7 +31,8 @@ from topology.docker_utils import DockerUtilsGenArgs, DockerUtilsGenerator
 from topology.net import NetworkDescription, IPNetwork
 from topology.sig import SIGGenArgs, SIGGenerator
 
-DOCKER_CONF = 'scion-dc.yml'
+# before: scion-dc.yml
+DOCKER_CONF = 'docker-compose.yml'
 
 
 class DockerGenArgs(ArgsTopoDicts):
@@ -124,14 +125,12 @@ class DockerGenerator(object):
             self.bridges[str(network)] = net_name
             self.dc_conf['networks'][net_name] = {
                 'ipam': {
+                    'driver': 'default',
                     'config': [{
                         'subnet': str(network)
                     }]
                 },
                 'driver': 'bridge',
-                'driver_opts': {
-                    'com.docker.network.bridge.name': net_name
-                }
             }
             if net_desc.name in v4nets:
                 v4_net = v4nets[net_desc.name]
@@ -145,20 +144,20 @@ class DockerGenerator(object):
             image = docker_image(self.args, 'posix-router')
             entry = {
                 'image': image,
-                'container_name': self.prefix + k,
+                # 'container_name': self.prefix + k,
                 'networks': {},
-                'user': self.user,
+                # 'user': self.user,
                 'volumes':
                 ['%s:/share/conf:ro' % base],
                 'environment': {
                     'SCION_EXPERIMENTAL_BFD_DETECT_MULT':
-                    '${SCION_EXPERIMENTAL_BFD_DETECT_MULT}',
+                    '5s',
                     'SCION_EXPERIMENTAL_BFD_DESIRED_MIN_TX':
-                    '${SCION_EXPERIMENTAL_BFD_DESIRED_MIN_TX}',
+                    '5s',
                     'SCION_EXPERIMENTAL_BFD_REQUIRED_MIN_RX':
-                    '${SCION_EXPERIMENTAL_BFD_REQUIRED_MIN_RX}',
+                    '5s',
                 },
-                'command': ['--config', '/share/conf/%s.toml' % k]
+                'command': '/root/router --config /share/conf/%s.toml' % k
             }
             # add data networks:
             net_keys = [k, k + '_internal']
@@ -174,23 +173,35 @@ class DockerGenerator(object):
 
     def _control_service_conf(self, topo_id, topo, base):
         for k in topo.get("control_service", {}).keys():
+            net = self.elem_networks[k][0]
+            ipv = 'ipv4'
+            if ipv not in net:
+                ipv = 'ipv6'
+            ip = str(net[ipv])
+            # disp_conf = k.split("-", 1)
             entry = {
                 'image':
                 docker_image(self.args, 'control'),
                 'container_name':
                 self.prefix + k,
-                'depends_on': ['scion_disp_%s' % k],
-                'network_mode':
-                'service:scion_disp_%s' % k,
-                'user':
-                self.user,
-                'volumes': [
-                    self._cache_vol(),
-                    self._certs_vol(),
-                    '%s:/share/conf:ro' % base,
-                    self._disp_vol(k),
+                'networks': {
+                    self.bridges[net['net']]: {
+                        '%s_address' % ipv: ip
+                    }
+                },
+                # 'depends_on': ['scion_disp_%s' % k],
+                # 'network_mode':
+                    # 'service:scion_disp_%s' % k,
+                    # 'user':
+                    # self.user,
+                    'volumes': [
+                        self._cache_vol(),
+                        self._certs_vol(),
+                        '%s:/share/conf:ro' % base,
+                        # self._disp_vol(k),
                 ],
-                'command': ['--config', '/share/conf/%s.toml' % k]
+
+                'command': 'bash /root/run.sh /share/conf/disp_%s.toml /share/conf/%s.toml' % (k, k)
             }
             self.dc_conf['services']['scion_%s' % k] = entry
 
@@ -229,9 +240,10 @@ class DockerGenerator(object):
                 '--config', '/share/conf/disp_%s.toml' % disp_id
             ]
 
-            self.dc_conf['services']['scion_disp_%s' % disp_id] = entry
-            self.dc_conf['volumes'][self._disp_vol(disp_id).split(':')
-                                    [0]] = None
+        # tHE DISPATCHER runs inside daemon and control
+        # self.dc_conf['services']['scion_disp_%s' % disp_id] = entry
+        # self.dc_conf['volumes'][self._disp_vol(disp_id).split(':')
+        #                      [0]] = None
 
     def _sciond_conf(self, topo_id, base):
         name = sciond_svc_name(topo_id)
@@ -242,16 +254,16 @@ class DockerGenerator(object):
         ip = str(net[ipv])
         disp_id = 'cs%s-1' % topo_id.file_fmt()
         entry = {
-            'extra_hosts': ['jaeger:%s' % docker_host(self.args.docker)],
+            # 'extra_hosts': ['jaeger:%s' % docker_host(self.args.docker)],
             'image':
             docker_image(self.args, 'daemon'),
-            'container_name':
-            '%ssd%s' % (self.prefix, topo_id.file_fmt()),
-            'depends_on': ['scion_disp_%s' % disp_id],
-            'user':
-            self.user,
+            # 'container_name':
+            # '%ssd%s' % (self.prefix, topo_id.file_fmt()),
+            # 'depends_on': ['scion_disp_%s' % disp_id],
+            # 'user':
+            # self.user,
             'volumes': [
-                self._disp_vol(disp_id),
+                # self._disp_vol(disp_id),
                 self._cache_vol(),
                 self._certs_vol(),
                 '%s:/share/conf:ro' % base
@@ -261,7 +273,9 @@ class DockerGenerator(object):
                     '%s_address' % ipv: ip
                 }
             },
-            'command': ['--config', '/share/conf/sd.toml'],
+            # TODO: This disp_cs%s is probably not correct, verify for larger topologies
+            # We need a default dispatcher toml here...
+            'command': 'bash /root/run.sh /share/conf/disp_cs%s-1.toml /share/conf/sd.toml' % topo_id.file_fmt()
         }
         self.dc_conf['services'][name] = entry
 
