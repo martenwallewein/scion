@@ -148,8 +148,8 @@ class SubnetGenerator(object):
             else:
                 # Docker needs space for a network and broadcast address as well as an IP linking
                 # to the host
-                # req_prefix = max_prefix - math.ceil(math.log2(len(subnet) + 3))
-                req_prefix = 24
+                req_prefix = max_prefix - math.ceil(math.log2(len(subnet) + 6))
+                # req_prefix = 24
 
             # Search all subnets from that size upwards
             for prefix in range(req_prefix, -1, -1):
@@ -160,8 +160,8 @@ class SubnetGenerator(object):
                 # Carve out subnet of the required size
                 new_net = next(alloc.subnets(new_prefix=req_prefix))
                 new_net = _workaround_ip_network_hosts_py35(new_net)
-                logging.debug("Allocating %s from %s for subnet size %d" %
-                              (new_net, alloc, len(subnet)))
+                logging.info("Allocating %s from %s for subnet size %d" %
+                             (new_net, alloc, len(subnet)))
                 networks[new_net] = NetworkDescription(topo, subnet.alloc_addrs(new_net))
                 # Repopulate the allocations list with the left-over space
                 self._exclude_net(alloc, new_net)

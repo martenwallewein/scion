@@ -208,7 +208,7 @@ class DockerGenerator(object):
     def _dispatcher_conf(self, topo_id, topo, base):
         image = 'dispatcher'
         base_entry = {
-            'extra_hosts': ['jaeger:%s' % docker_host(self.args.docker)],
+            # 'extra_hosts': ['jaeger:%s' % docker_host(self.args.docker)],
             'image': docker_image(self.args, image),
             'networks': {},
             'user': self.user,
