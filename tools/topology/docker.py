@@ -268,6 +268,10 @@ class DockerGenerator(object):
                 self._certs_vol(),
                 '%s:/share/conf:ro' % base
             ],
+            'environment': {
+                'SCION_DAEMON':
+                '%s:30255' % ip,
+            },
             'networks': {
                 self.bridges[net['net']]: {
                     '%s_address' % ipv: ip
