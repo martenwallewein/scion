@@ -174,6 +174,7 @@ func (p *Propagator) beaconsPerInterface(
 		}
 		beacons = append(beacons, b)
 	}
+
 	r := make(map[*ifstate.Interface][]beacon.Beacon)
 	for _, intf := range intfs {
 		toPropagate := make([]beacon.Beacon, 0, len(beacons))
@@ -187,6 +188,8 @@ func (p *Propagator) beaconsPerInterface(
 			}
 			toPropagate = append(toPropagate, beacon.Beacon{Segment: ps, InIfId: b.InIfId})
 		}
+		// TODO: replace with scripting logic
+		toPropagate = filterPropagateBeacons(p.IA, intf, toPropagate)
 		r[intf] = toPropagate
 	}
 	return r, nil
