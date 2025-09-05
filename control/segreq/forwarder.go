@@ -15,9 +15,15 @@
 package segreq
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
+	"fmt"
+	"net/http"
 
+	"github.com/scionproto/scion/oracle"
 	"github.com/scionproto/scion/pkg/addr"
+	"github.com/scionproto/scion/pkg/log"
 	"github.com/scionproto/scion/pkg/private/serrors"
 	seg "github.com/scionproto/scion/pkg/segment"
 	"github.com/scionproto/scion/private/segment/segfetcher"
@@ -56,7 +62,64 @@ func (f ForwardingLookup) LookupSegments(ctx context.Context, src,
 	if err != nil {
 		return nil, serrors.Wrap("expanding wildcard request", err)
 	}
-	return f.Fetcher.Fetch(ctx, reqs, false)
+	segments, err := f.Fetcher.Fetch(ctx, reqs, false)
+	if err != nil {
+		for _, seq := range segments {
+			fmt.Println("segment:", seq)
+			fmt.Println("  info:", seq.Segment.Info)
+			fmt.Println("  Entries:", seq.Segment.ASEntries)
+		}
+	}
+
+	// Call http to localhost:8181/segments with src,dst,segments
+	log.Debug("LookupSegments", "src", src, "dst", dst, "type", segType,
+		"num_segs", len(segments), "err", err)
+
+	client := http.Client{}
+	url := "http://localhost:8281/segments"
+	reqBody := oracle.SegmentsFilterRequest{
+		Src:      src,
+		Dst:      dst,
+		Segments: segments,
+	}
+
+	bodyBytes, err := json.Marshal(reqBody)
+	if err != nil {
+		log.Error("Failed to marshal request body", "err", err)
+		return segments, err
+	}
+
+	req, err := http.NewRequest("POST", url, bytes.NewReader(bodyBytes))
+	if err != nil {
+		log.Error("Failed to create HTTP request", "err", err)
+		return segments, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := client.Do(req)
+	if err != nil {
+		log.Error("Failed to send HTTP request", "err", err)
+		return segments, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		log.Error("Received non-OK response from oracle", "status", resp.Status)
+		return segments, serrors.New("non-OK response from oracle", "status", resp.Status)
+	}
+
+	log.Debug("Successfully sent segments to oracle", "num_segs", len(segments))
+
+	// Parse response from body
+	respBody := oracle.SegmentsFilterResponse{}
+	err = json.NewDecoder(resp.Body).Decode(&respBody)
+	if err != nil {
+		log.Error("Failed to decode response body", "err", err)
+		return segments, err
+	}
+
+	log.Debug("Received filtered segments from oracle", "num_segs", len(respBody.Segments))
+	return respBody.Segments, err
 }
 
 // classify validates the request and determines the segment type for the request
